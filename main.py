@@ -1,9 +1,9 @@
 """
-v9_timeline.py
-Version 9: Simple Thread Timeline Visualization
+v8_timeline.py
+Version 8: Simple Thread Timeline Visualization
 
 Run:
-    python v9_timeline.py
+    python v8_timeline.py
 """
 import threading
 from queue import Queue, Empty
@@ -109,7 +109,7 @@ def color_for_index(i):
 class TimelineGUI:
     def __init__(self, root):
         self.root = root
-        root.title("Thread Timeline Visualizer - v9")
+        root.title("Thread Timeline Visualizer - v8")
         root.geometry("980x620")
         self.gui_queue = Queue()
         self.pool = ThreadPool()
@@ -332,8 +332,10 @@ class TimelineGUI:
                     nx = 8 + i * 54
                     self.queue_canvas.coords(r2, nx, 10, nx + 46, 70)
                     self.queue_canvas.coords(t2, nx + 23, 40)
+
+    # ---------------------
     # GUI queue processing (messages from workers)
- 
+    # ---------------------
     def _process_gui_queue(self):
         try:
             while True:
@@ -349,7 +351,9 @@ class TimelineGUI:
                     # when worker picks the task, remove from queued visuals and create timeline bar
                     self._remove_queue_box(task_id)
                     self.lbl_queued.config(text=f"Queued: {len(self.visual_order)}")
-                    
+                    # We don't know duration here; we can approximate by storing a mapping when submitting tasks.
+                    # To keep it simple, embed duration into the log message earlier: we instead map task durations locally.
+                    # For this implementation, we'll check expected duration map:
                     duration_ms = task_duration_map.pop(task_id, 700)
                     self._start_bar_for_task(task_id, widx, duration_ms)
                     self._log(f"{timestamp()} - Task {task_id} started on W{widx} (dur {duration_ms}ms)")
@@ -369,7 +373,9 @@ class TimelineGUI:
             pass
         self.root.after(120, self._process_gui_queue)
 
+    # ---------------------
     # Logging helper
+    # ---------------------
     def _log(self, s):
         self.log.config(state="normal")
         self.log.insert("end", s + "\n")
@@ -384,13 +390,25 @@ class TimelineGUI:
                 return
         self.root.destroy()
 
+# -----------------------------
+# Task duration map (keeps duration at submit time)
+# -----------------------------
+# This is a simple global map to remember the duration chosen at submission,
+# so when the worker signals 'task_started' the GUI knows how wide the bar should be.
 task_duration_map = {}
 
-
+# -----------------------------
+# Run application
+# -----------------------------
 if __name__ == "__main__":
     root = tk.Tk()
     gui = TimelineGUI(root)
-    
+    # monkey patch gui_queue into pool on create; submission will also register duration
+    # override add task button to insert duration mapping before submit
+    # We hook into _add_task already doing mapping inside _add_task.
+    # But to ensure mapping is recorded, we will slightly adapt _add_task logic: (already handled)
+    # For standalone clarity: replace pool.submit with wrapped function to set duration map.
+    # We'll override submit to capture durations: create wrapper
     original_submit = gui.pool.submit
 
     def wrapped_submit_with_duration(task_callable, duration_ms=None):
