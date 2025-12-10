@@ -1,115 +1,109 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 import threading
 import time
+import queue
 
-class SchedulerGUI:
+class MultiLevelCPU:
+    def __init__(self):
+        self.queues = {
+            "High": queue.Queue(),
+            "Medium": queue.Queue(),
+            "Low": queue.Queue()
+        }
+        self.running = False
+        self.timeline_log = []
+
+    def add_task(self, name, burst, priority):
+        self.queues[priority].put([name, burst])
+
+    def get_next_task(self):
+        for level in ["High", "Medium", "Low"]:
+            if not self.queues[level].empty():
+                return level, self.queues[level].get()
+        return None, None
+
+    def run(self, update_ui_callback):
+        self.running = True
+        while self.running:
+            level, task = self.get_next_task()
+            if task is None:
+                time.sleep(0.2)
+                continue
+
+            name, burst = task
+            for t in range(burst):
+                if not self.running:
+                    return
+                update_ui_callback(name, level, t + 1, burst)
+                time.sleep(0.25)
+
+            self.timeline_log.append(f"{name} finished from {level} queue")
+
+    def stop(self):
+        self.running = False
+
+
+class CPU_GUI:
     def __init__(self, root):
+        self.cpu = MultiLevelCPU()
         self.root = root
-        self.root.title("CPU Scheduler - Version 6")
-        self.root.geometry("700x500")
+        root.title("Version 7: Multi-Level CPU Scheduler")
+        root.geometry("700x500")
 
-        self.processes = []
-        self.build_ui()
+        self.setup_ui()
 
-    def build_ui(self):
-        title = tk.Label(self.root, text="CPU Scheduler (Version 6)", font=("Arial", 18))
-        title.pack(pady=10)
+    def setup_ui(self):
+        frame = tk.Frame(self.root)
+        frame.pack(pady=10)
 
-        # Algorithm chooser
-        algo_frame = tk.Frame(self.root)
-        algo_frame.pack()
+        tk.Label(frame, text="Task Name").grid(row=0, column=0)
+        tk.Label(frame, text="Burst Time").grid(row=0, column=1)
+        tk.Label(frame, text="Priority").grid(row=0, column=2)
 
-        tk.Label(algo_frame, text="Select Algorithm:", font=("Arial", 12)).grid(row=0, column=0)
-        self.algo_choice = ttk.Combobox(
-            algo_frame,
-            values=["FCFS", "SJF", "Priority", "Round Robin"],
-            state="readonly",
-            width=20
-        )
-        self.algo_choice.grid(row=0, column=1)
-        self.algo_choice.current(0)
+        self.name_entry = tk.Entry(frame)
+        self.burst_entry = tk.Entry(frame)
 
-        # Process input frame
-        input_frame = tk.Frame(self.root)
-        input_frame.pack(pady=10)
+        self.name_entry.grid(row=1, column=0)
+        self.burst_entry.grid(row=1, column=1)
 
-        tk.Label(input_frame, text="Process ID").grid(row=0, column=0)
-        tk.Label(input_frame, text="Burst Time").grid(row=0, column=1)
-        tk.Label(input_frame, text="Priority").grid(row=0, column=2)
-
-        self.pid = tk.Entry(input_frame, width=10)
-        self.burst = tk.Entry(input_frame, width=10)
-        self.priority = tk.Entry(input_frame, width=10)
-
-        self.pid.grid(row=1, column=0)
-        self.burst.grid(row=1, column=1)
+        self.priority = ttk.Combobox(frame, values=["High", "Medium", "Low"], width=10)
         self.priority.grid(row=1, column=2)
+        self.priority.current(0)
 
-        add_btn = tk.Button(self.root, text="Add Process", command=self.add_process)
-        add_btn.pack()
+        tk.Button(frame, text="Add Task", command=self.add_task).grid(row=1, column=3, padx=10)
 
-        self.output_box = tk.Text(self.root, height=12, width=80)
-        self.output_box.pack(pady=10)
+        self.start_btn = tk.Button(self.root, text="Start CPU", command=self.start_cpu)
+        self.start_btn.pack(pady=10)
 
-        start_btn = tk.Button(self.root, text="Start Scheduling", command=self.start_scheduling)
-        start_btn.pack()
+        self.progress = ttk.Progressbar(self.root, length=500)
+        self.progress.pack(pady=10)
 
-    def add_process(self):
-        try:
-            p = self.pid.get()
-            b = int(self.burst.get())
-            pr = int(self.priority.get() or 0)
-            self.processes.append([p, b, pr])
-            self.output_box.insert(tk.END, f"Added: {p} (BT={b}, PR={pr})\n")
-        except ValueError:
-            messagebox.showerror("Error", "Invalid input")
+        self.status = tk.Label(self.root, text="Waiting...", font=("Arial", 12))
+        self.status.pack()
 
-    def start_scheduling(self):
-        if not self.processes:
-            messagebox.showerror("Error", "Add processes first")
-            return
+        self.timeline = tk.Listbox(self.root, height=10, width=80)
+        self.timeline.pack(pady=10)
 
-        t = threading.Thread(target=self.run_scheduler)
-        t.start()
+    def add_task(self):
+        name = self.name_entry.get()
+        burst = int(self.burst_entry.get())
+        pr = self.priority.get()
 
-    def log(self, msg):
-        self.output_box.insert(tk.END, msg + "\n")
-        self.output_box.see(tk.END)
-        time.sleep(0.5)
+        self.cpu.add_task(name, burst, pr)
+        self.timeline.insert(tk.END, f"Added {name} [{burst}] to {pr}")
 
-    # Scheduler core
-    def run_scheduler(self):
-        algo = self.algo_choice.get()
-        procs = [p[:] for p in self.processes]
+    def update_ui(self, name, level, current, total):
+        self.status.config(text=f"Running {name} from {level} ({current}/{total})")
+        self.progress["value"] = (current / total) * 100
 
-        self.log(f"Running {algo} scheduling...")
+    def start_cpu(self):
+        self.start_btn.config(state="disabled")
+        th = threading.Thread(target=self.cpu.run, args=(self.update_ui,))
+        th.daemon = True
+        th.start()
 
-        if algo == "FCFS":
-            for p in procs:
-                self.log(f"Running {p[0]} for {p[1]} ms")
-        elif algo == "SJF":
-            procs.sort(key=lambda x: x[1])
-            for p in procs:
-                self.log(f"SJF picked {p[0]} (BT={p[1]})")
-        elif algo == "Priority":
-            procs.sort(key=lambda x: x[2])
-            for p in procs:
-                self.log(f"Priority picked {p[0]} (PR={p[2]})")
-        elif algo == "Round Robin":
-            quantum = 4
-            self.log(f"Quantum = {quantum}")
-            q = procs[:]
-            while q:
-                p = q.pop(0)
-                run = min(quantum, p[1])
-                self.log(f"RR running {p[0]} for {run} ms")
-                p[1] -= run
-                if p[1] > 0:
-                    q.append(p)
-
-        self.log("Scheduling Complete.")
 
 root = tk.Tk()
-app = SchedulerGUI(root)
+app = CPU_GUI(root)
 root.mainloop()
